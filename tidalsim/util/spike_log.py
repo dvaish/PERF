@@ -33,6 +33,45 @@ syscalls = ["ecall", "ebreak", "mret", "sret", "uret"]
 control_insts = set(branches + jumps + syscalls)
 no_target_insts = set(syscalls + ["jr", "jalr", "c.jr", "c.jalr", "ret"])
 
+# # RISC-V Base ISA custom opcode space
+# custom = {
+#     0b00_010_11: "CUSTOM_0",
+#     0b01_010_11: "CUSTOM_1",
+#     0b10_110_11: "CUSTOM_2",
+#     0b11_110_11: "CUSTOM_3",
+# }
+
+# # funct7 map from Gemmini.h
+# # These funct7 codes tell us which Gemmini instruction is being executed from the RoCC instruction
+# rocc = {
+#     0:   "k_CONFIG",
+#     1:   "k_MVIN2",
+#     2:   "k_MVIN",
+#     3:   "k_MVOUT",
+#     4:   "k_COMPUTE_PRELOADED",
+#     5:   "k_COMPUTE_ACCUMULATE",
+#     6:   "k_PRELOAD",
+#     7:   "k_FLUSH",
+#     8:   "k_LOOP_WS",
+#     9:   "k_LOOP_WS_CONFIG_BOUNDS",
+#     10:  "k_LOOP_WS_CONFIG_ADDRS_AB",
+#     11:  "k_LOOP_WS_CONFIG_ADDRS_DC",
+#     12:  "k_LOOP_WS_CONFIG_STRIDES_AB",
+#     13:  "k_LOOP_WS_CONFIG_STRIDES_DC",
+#     14:  "k_MVIN3",
+#     126: "k_COUNTER",
+#     15:  "k_LOOP_CONV_WS",
+#     16:  "k_LOOP_CONV_WS_CONFIG_1",
+#     17:  "k_LOOP_CONV_WS_CONFIG_2",
+#     18:  "k_LOOP_CONV_WS_CONFIG_3",
+#     19:  "k_LOOP_CONV_WS_CONFIG_4",
+#     20:  "k_LOOP_CONV_WS_CONFIG_5",
+#     21:  "k_LOOP_CONV_WS_CONFIG_6",
+#     23:  "k_MVOUT_SPAD"
+# }
+
+
+
 
 class Op(IntEnum):
     Store = 0
@@ -50,16 +89,16 @@ class SpikeCommitInfo:
 class SpikeTraceEntry:
     pc: int
     # the raw decoded instruction from spike
+    inst: int
     decoded_inst: str
     # the absolute dynamic instruction count. [inst_count] is zero-indexed
     inst_count: int
     # if the spike log was collected with --log-commits and this trace entry is a memory operation,
     #   [commit_info] will contain the memory operation
-    commit_info: Optional[SpikeCommitInfo] = None
+    commit_info: Optional[SpikeCommitInfo] = None 
 
     def is_control_inst(self) -> bool:
         return self.decoded_inst in control_insts
-
 
 # [full_commit_log] = True if spike was ran with '-l --log-commits', False if spike is only run with '-l'
 def parse_spike_log(log_lines: Iterator[str], full_commit_log: bool) -> Iterator[SpikeTraceEntry]:
@@ -71,7 +110,22 @@ def parse_spike_log(log_lines: Iterator[str], full_commit_log: bool) -> Iterator
         if s[2][0] == ">":
             continue  # this is a spike-decoded label, ignore it
         pc = int(s[2][2:], 16)
+        inst = int(s[3][1:-1], 16)
         decoded_inst = s[4]
+
+        # # Extract the opcode and funct7 to decode Gemmini RoCC instructions
+        # opcode = inst % (2 ** 7)            # inst[6:0]
+        # funct7 = (inst >> 25) % (2 ** 7)    # inst[31:25]
+
+        # rs1 = (inst >> 15) % (2 ** 5)       # inst[15:19]
+        # rs2 = (inst >> 20) % (2 ** 5)       # inst[20:24]
+        # rd = (inst >> 7)  % (2 ** 5)       # inst[7:11]
+
+        # if opcode in custom:        # All Gemmini RoCC instructions use XCUSTOM_ACC=3 mapping to custom3 opcode
+        #     assert decoded_inst == "unknown", f"Expected custom instruction to be labeled unknown, is {decoded_inst}"
+        #     if funct7 in rocc:      # Map the funct7 to the Gemmini function
+        #         decoded_inst = rocc[funct7]
+
         # Ignore spike trace outside DRAM
         if pc < 0x8000_0000:
             if full_commit_log:
@@ -106,5 +160,5 @@ def parse_spike_log(log_lines: Iterator[str], full_commit_log: bool) -> Iterator
                 commit_info = SpikeCommitInfo(
                     address=int(s2[8][2:], 16), data=int(s2[6][2:], 16), op=Op.Load
                 )
-        yield SpikeTraceEntry(pc, decoded_inst, inst_count, commit_info)
+        yield SpikeTraceEntry(pc, inst, decoded_inst, inst_count, commit_info)
         inst_count += 1
