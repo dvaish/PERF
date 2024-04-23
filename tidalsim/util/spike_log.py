@@ -70,19 +70,25 @@ no_target_insts = set(syscalls + ["jr", "jalr", "c.jr", "c.jalr", "ret"])
 #     23:  "k_MVOUT_SPAD"
 # }
 
-
-
-
 class Op(IntEnum):
     Store = 0
     Load = 1
 
+class GemminiOp(IntEnum):
+    Mvin = 0
+    Mvout = 1
 
 @dataclass
 class SpikeCommitInfo:
     address: int
     data: int
     op: Op
+
+@dataclass
+class GemminiCommitInfo:
+    address: List[int]
+    data: Optional[List[int]]
+    op: int
 
 
 @dataclass
@@ -107,8 +113,9 @@ def parse_spike_log(log_lines: Iterator[str], full_commit_log: bool) -> Iterator
         # Example of first line (regular commit log)
         # core   0: 0x0000000080001a8e (0x00009522) c.add   a0, s0
         s = line.split()
-        if s[2][0] == ">":
+        if s[2][0] == ">" or s[2][0] == "3":
             continue  # this is a spike-decoded label, ignore it
+                      # this could also be spike dumping the last commit repeatedly as it waits for fesvr to exit
         pc = int(s[2][2:], 16)
         inst = int(s[3][1:-1], 16)
         decoded_inst = s[4]
@@ -149,10 +156,30 @@ def parse_spike_log(log_lines: Iterator[str], full_commit_log: bool) -> Iterator
             # Load instruction
             # core   0: 3 0x0000000080000250 (0x638c) x11 0x0000000080001d68 mem 0x0000000080001d90
             # <hartid>: <priv>          <PC>   <inst> <rd>       <load data>            <load addr>
+
+            # Gemmini mvin
+            # core   0: 3 0x0000000080002818 (0x04c7307b) mem 0x00000000800032c0 mem 0x00000000800032c1 ...
+            # <hartid>: <priv>          <PC>       <inst>            <mvin addr>
+
+            # Gemmin mvout
+            # core   0: 3 0x000000008000281c (0x06c6b07b) mem 0x0000000080002ac0 0x00 mem 0x0000000080002ac1 0x01 ... 
+            # <hartid>: <priv>          <PC>       <inst>           <mvout addr> <mvout data>
             assert line2 is not None
             s2 = line2.split()
             s2_len = len(s2)
-            if s2_len == 8 and s2[5] == "mem":  # store instruction
+            if s2_len > 9 and s2[7] == "mem":
+                commit_info = GemminiCommitInfo(
+                    address=list(map(lambda x: int(x, 16), s2[6::2])),
+                    data=None,
+                    op=GemminiOp.Mvin
+                )
+            elif s2_len > 9:
+                commit_info = GemminiCommitInfo(
+                    address=list(map(lambda x: int(x, 16), s2[6::3])),
+                    data=list(map(lambda x: int(x, 16), s2[7::3])),
+                    op=GemminiOp.Mvout
+                )
+            elif s2_len == 8 and s2[5] == "mem":  # store instruction
                 commit_info = SpikeCommitInfo(
                     address=int(s2[6][2:], 16), data=int(s2[7][2:], 16), op=Op.Store
                 )
