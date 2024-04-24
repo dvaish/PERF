@@ -11,24 +11,33 @@ from tidalsim.modeling.schemas import ClusteringSchema, EstimatedPerfSchema, Gol
 
 
 @dataclass
-class PerfInfo:
+class PerfMetrics:
     ipc: float
 
 
+# Pick which
+def choose_for_rtl_sim(clustering_df: DataFrame[ClusteringSchema]) -> DataFrame[ClusteringSchema]:
+    pass
+
+
+# Build the performance metrics struct from a csv file dumped from RTL simulation
 def parse_perf_file(
     perf_file: Path,
     detailed_warmup_insts: int,
-) -> PerfInfo:
+) -> PerfMetrics:
     perf_data = pd.read_csv(perf_file)
-    perf_data["ipc"] = perf_data["instret"] / perf_data["cycles"]
-    perf_data["inst_count"] = np.cumsum(perf_data["instret"])
+    perf_data["insts_retired_after_interval"] = np.cumsum(perf_data["instret"])
+    perf_data["insts_retired_before_interval"] = (
+        perf_data["insts_retired_after_interval"] - perf_data["instret"]
+    )
     # Find the first row where more than [detailed_warmup_insts] have elapsed, and only begin tracking IPC from that row onwards
-    start_point = (perf_data["inst_count"] > detailed_warmup_insts).idxmax()
+    start_point = (perf_data["insts_retired_before_interval"] >= detailed_warmup_insts).idxmax()
     perf_data_visible = perf_data[start_point:]
     ipc = np.sum(perf_data_visible["instret"]) / np.sum(perf_data_visible["cycles"])
-    return PerfInfo(ipc=ipc)
+    return PerfMetrics(ipc=ipc)
 
 
+# Given a dataframe with intervals and their clusters, pick the
 def get_checkpoint_insts(clustering_df: DataFrame[ClusteringSchema]) -> List[int]:
     # For now, only the first interval in each cluster that has 'chosen_for_rtl_sim' == True is actually run in RTL simulation
     # TODO: fix this
@@ -45,8 +54,8 @@ def get_checkpoint_insts(clustering_df: DataFrame[ClusteringSchema]) -> List[int
 # Returns a list of performance metrics to be used for extrapolation for each cluster_id
 def get_perf_infos(
     clustering_df: DataFrame[ClusteringSchema], cluster_dir: Path, detailed_warmup_insts: int
-) -> List[PerfInfo]:
-    perf_infos: List[PerfInfo] = []
+) -> List[PerfMetrics]:
+    perf_infos: List[PerfMetrics] = []
     for index, row in simulated_points.iterrows():
         perf_file = cluster_dir / "checkpoints" / f"0x80000000.{row['inst_start']}" / "perf.csv"
         perf_info = parse_perf_file(perf_file, detailed_warmup_insts)

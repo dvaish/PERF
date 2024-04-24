@@ -59,22 +59,11 @@ def run_rtl_sim_cmd(
     # +no_hart0_msip = with loadarch, the target should begin execution immediately without
     #   an interrupt required to jump out of the bootrom
     rtl_sim_cmd = (
-        f"{simulator} "
-        "+permissive "
-        "+dramsim "
-        f"+dramsim_ini_dir={chipyard_root.resolve()}/generators/testchipip/src/main/resources/dramsim2_ini "
-        "+no_hart0_msip "
-        "+ntb_random_seed_automatic "
-        f"+max-cycles={timeout_cycles} "
-        f"+perf-sample-period={perf_sample_period} "
-        f"+perf-file={perf_file.resolve()} "
-        f"{max_insts_str}"
-        f"+loadmem={binary.resolve()} "
-        f"+loadarch={loadarch.resolve()} "
-        f"{checkpoint_dir_str}"
-        "+permissive-off "
-        f"{suppress_exit_str}"
-        f"{binary.resolve()}"
+        f"{simulator} +permissive +dramsim"
+        f" +dramsim_ini_dir={chipyard_root.resolve()}/generators/testchipip/src/main/resources/dramsim2_ini"
+        " +no_hart0_msip +ntb_random_seed_automatic"
+        f" +max-cycles={timeout_cycles} +perf-sample-period={perf_sample_period} +perf-file={perf_file.resolve()} {max_insts_str}+loadmem={binary.resolve()} +loadarch={loadarch.resolve()} {checkpoint_dir_str}+permissive-off"
+        f" {suppress_exit_str}{binary.resolve()}"
     )
     return rtl_sim_cmd
     # run_cmd(rtl_sim_cmd, cwd)

@@ -16,6 +16,6 @@ class TestUtilCli:
             loadarch=(tmp_path / "loadarch"),
             suppress_exit=True,
             checkpoint_dir=tmp_path,
-            timeout_cycles=5000
+            timeout_cycles=5000,
         )
         print(cmd)

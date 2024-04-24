@@ -10,7 +10,13 @@ import pprint
 from pandera.typing import DataFrame
 import numpy as np
 
-from tidalsim.util.cli import run_cmd, run_cmd_capture, run_cmd_pipe, run_cmd_pipe_stdout, run_rtl_sim_cmd
+from tidalsim.util.cli import (
+    run_cmd,
+    run_cmd_capture,
+    run_cmd_pipe,
+    run_cmd_pipe_stdout,
+    run_rtl_sim_cmd,
+)
 from tidalsim.util.spike_ckpt import *
 from tidalsim.util.spike_log import parse_spike_log
 from tidalsim.bb.spike import spike_trace_to_bbs, spike_trace_to_embedding_df, BasicBlocks

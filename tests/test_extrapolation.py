@@ -1,7 +1,7 @@
 from pathlib import Path
 from pandera.typing import DataFrame
 
-from tidalsim.modeling.extrapolation import parse_perf_file, get_checkpoint_insts
+from tidalsim.modeling.extrapolation import parse_perf_file, get_checkpoint_insts, PerfMetrics
 from tidalsim.modeling.schemas import ClusteringSchema
 
 
@@ -12,11 +12,22 @@ class TestExtrapolation:
 140,100
 130,100
 135,100"""
-        with (tmp_path / "perf.csv").open("w") as f:
+        perf_file = tmp_path / "perf.csv"
+        with perf_file.open("w") as f:
             f.write(perf_file_csv)
-        perf = parse_perf_file(tmp_path / "perf.csv", 0)
-        expected_ipc = 400 / (180 + 140 + 130 + 135)
-        assert perf.ipc == expected_ipc
+        perf = parse_perf_file(perf_file, detailed_warmup_insts=0)
+        expected_perf = PerfMetrics(ipc=400 / (180 + 140 + 130 + 135))
+        assert perf == expected_perf
+
+        perf = parse_perf_file(perf_file, detailed_warmup_insts=100)
+        expected_perf = PerfMetrics(ipc=300 / (140 + 130 + 135))
+        assert perf == expected_perf
+
+        perf = parse_perf_file(
+            perf_file, detailed_warmup_insts=150
+        )  # should round up to the next interval after 150 insts
+        expected_perf = PerfMetrics(ipc=200 / (130 + 135))
+        assert perf == expected_perf
 
     def test_get_checkpoint_insts(self) -> None:
         clustering_df = DataFrame[ClusteringSchema]({
