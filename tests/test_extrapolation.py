@@ -4,7 +4,6 @@ from pandera.typing import DataFrame
 from tidalsim.modeling.extrapolation import (
     fill_perf_metrics,
     parse_perf_file,
-    # get_checkpoint_insts,
     PerfMetrics,
     pick_intervals_for_rtl_sim,
 )
@@ -68,13 +67,13 @@ class TestExtrapolation:
 
     def test_pick_intervals_for_rtl_sim(self) -> None:
         clustering_df = DataFrame[ClusteringSchema]({
-            "instret": [100, 100, 100, 100],
-            "inst_count": [100, 200, 300, 400],
-            "inst_start": [0, 100, 200, 300],
-            "embedding": [[0, 1], [0, 1], [1, 2], [3, 4]],
-            "cluster_id": [2, 2, 1, 0],
-            "dist_to_centroid": [0.0, 0.0, 0.0, 0.0],
-            "chosen_for_rtl_sim": [False, False, False, False],
+            "instret": [100, 100, 100, 100, 100],
+            "inst_count": [100, 200, 300, 400, 500],
+            "inst_start": [0, 100, 200, 300, 400],
+            "embedding": [[0, 1], [0, 1], [], [1, 2], [3, 4]],
+            "cluster_id": [2, 2, 2, 1, 0],
+            "dist_to_centroid": [1.0, 1.0, 0.0, 0.0, 0.0],
+            "chosen_for_rtl_sim": [False, False, False, False, False],
         })
         pick_intervals_for_rtl_sim(clustering_df, 1)
-        assert clustering_df["chosen_for_rtl_sim"].to_list() == [True, False, True, True]
+        assert clustering_df["chosen_for_rtl_sim"].to_list() == [True, False, True, True, True]

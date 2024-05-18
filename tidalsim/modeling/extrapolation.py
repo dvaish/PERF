@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from pandas.core.common import random_state
 from pandera.typing import DataFrame
+from sklearn.metrics import cluster
 
 from tidalsim.util.pickle import load
 from tidalsim.modeling.schemas import ClusteringSchema, EstimatedPerfSchema, GoldenPerfSchema
@@ -70,13 +70,17 @@ def fill_perf_metrics(
     return perf_df
 
 
-# Pick which intervals we are going to simulate in RTL. Randomly sample from each cluster.
+# Pick which intervals we are going to simulate in RTL.
+# Randomly sample from each cluster.
+# AND pick the closest point to each centroid too.
 def pick_intervals_for_rtl_sim(
     clustering_df: DataFrame[ClusteringSchema], points_per_cluster: int
 ) -> None:
     grouped_intervals = clustering_df.groupby("cluster_id")
     chosen_intervals = grouped_intervals.sample(points_per_cluster, random_state=1)
     clustering_df.loc[chosen_intervals.index, "chosen_for_rtl_sim"] = True
+    c = clustering_df.groupby("cluster_id")["dist_to_centroid"].idxmin()
+    clustering_df.loc[c, "chosen_for_rtl_sim"] = True
 
 
 def analyze_tidalsim_results(
