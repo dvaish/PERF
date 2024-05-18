@@ -1,9 +1,10 @@
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import Tuple, Optional, cast
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from pandas.core.common import random_state
 from pandera.typing import DataFrame
 
 from tidalsim.util.pickle import load
@@ -12,15 +13,13 @@ from tidalsim.modeling.schemas import ClusteringSchema, EstimatedPerfSchema, Gol
 
 @dataclass
 class PerfMetrics:
+    cycles: int
     ipc: float
 
 
-# Pick which
-def choose_for_rtl_sim(clustering_df: DataFrame[ClusteringSchema]) -> DataFrame[ClusteringSchema]:
-    pass
-
-
 # Build the performance metrics struct from a csv file dumped from RTL simulation
+# Assume perf metrics are captured without any offset from the start of the interval
+# Detailed warmup is accounted for in this function
 def parse_perf_file(
     perf_file: Path,
     detailed_warmup_insts: int,
@@ -34,33 +33,50 @@ def parse_perf_file(
     start_point = (perf_data["insts_retired_before_interval"] >= detailed_warmup_insts).idxmax()
     perf_data_visible = perf_data[start_point:]
     ipc = np.sum(perf_data_visible["instret"]) / np.sum(perf_data_visible["cycles"])
-    return PerfMetrics(ipc=ipc)
+    return PerfMetrics(ipc=ipc, cycles=np.sum(perf_data["cycles"]))
 
 
-# Given a dataframe with intervals and their clusters, pick the
-def get_checkpoint_insts(clustering_df: DataFrame[ClusteringSchema]) -> List[int]:
-    # For now, only the first interval in each cluster that has 'chosen_for_rtl_sim' == True is actually run in RTL simulation
-    # TODO: fix this
-    print(clustering_df.loc[clustering_df["chosen_for_rtl_sim"]].to_string())
-    simulated_points: DataFrame[ClusteringSchema] = (
-        clustering_df.loc[clustering_df["chosen_for_rtl_sim"]]
-        .groupby("cluster_id", as_index=False)
-        .nth(0)
-        .sort_values("cluster_id")
+# Fill each row in the [clustering_df] that was chosen for RTL simulation with performance numbers from RTL sim
+# BUT, DO NOT perform any extrapolation yet (leave the estimated perf blank for any row without RTL sim)
+def fill_perf_metrics(
+    clustering_df: DataFrame[ClusteringSchema],
+    cluster_dir: Path,
+    detailed_warmup_insts: int,
+) -> DataFrame[EstimatedPerfSchema]:
+    # Augment the dataframe with zeroed out estimated perf columns
+    perf_df = cast(
+        DataFrame[EstimatedPerfSchema],
+        clustering_df.assign(
+            est_cycles_cold=np.zeros(len(clustering_df.index)),
+            est_ipc_cold=np.zeros(len(clustering_df.index)),
+            est_cycles_warm=np.zeros(len(clustering_df.index)),
+            est_ipc_warm=np.zeros(len(clustering_df.index)),
+        ),
     )
-    return simulated_points["inst_start"].to_list()
+    simulated_rows = perf_df.loc[perf_df["chosen_for_rtl_sim"] == True]
+    for index, row in simulated_rows.iterrows():
+        checkpoint_dir = cluster_dir / "checkpoints" / f"0x80000000.{row.inst_start}"
+        cold_perf_file = checkpoint_dir / "perf_cold.csv"
+        warm_perf_file = checkpoint_dir / "perf_warm.csv"
+        if cold_perf_file.exists():
+            cold_perf = parse_perf_file(cold_perf_file, detailed_warmup_insts)
+            row.est_cycles_cold = cold_perf.cycles
+            row.est_ipc_cold = cold_perf.ipc
+        if warm_perf_file.exists():
+            warm_perf = parse_perf_file(warm_perf_file, detailed_warmup_insts)
+            row.est_cycles_warm = warm_perf.cycles
+            row.est_ipc_warm = warm_perf.ipc
+        perf_df.iloc[index] = row
+    return perf_df
 
 
-# Returns a list of performance metrics to be used for extrapolation for each cluster_id
-def get_perf_infos(
-    clustering_df: DataFrame[ClusteringSchema], cluster_dir: Path, detailed_warmup_insts: int
-) -> List[PerfMetrics]:
-    perf_infos: List[PerfMetrics] = []
-    for index, row in simulated_points.iterrows():
-        perf_file = cluster_dir / "checkpoints" / f"0x80000000.{row['inst_start']}" / "perf.csv"
-        perf_info = parse_perf_file(perf_file, detailed_warmup_insts)
-        perf_infos.append(perf_info)
-    return perf_infos
+# Pick which intervals we are going to simulate in RTL. Randomly sample from each cluster.
+def pick_intervals_for_rtl_sim(
+    clustering_df: DataFrame[ClusteringSchema], points_per_cluster: int
+) -> None:
+    grouped_intervals = clustering_df.groupby("cluster_id")
+    chosen_intervals = grouped_intervals.sample(points_per_cluster, random_state=1)
+    clustering_df.loc[chosen_intervals.index, "chosen_for_rtl_sim"] = True
 
 
 def analyze_tidalsim_results(

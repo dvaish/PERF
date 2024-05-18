@@ -1,5 +1,4 @@
 import subprocess
-import fileinput
 import sys
 from pathlib import Path
 from typing import Optional
@@ -66,4 +65,3 @@ def run_rtl_sim_cmd(
         f" {suppress_exit_str}{binary.resolve()}"
     )
     return rtl_sim_cmd
-    # run_cmd(rtl_sim_cmd, cwd)
