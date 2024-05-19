@@ -1,18 +1,14 @@
 from typing import List, Optional, Iterator
 from pathlib import Path
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
 import stat
-import shutil
 import itertools
 
 from joblib import Parallel, delayed
 
 from tidalsim.util.cli import run_cmd, run_cmd_capture
 from tidalsim.util.random import inst_points_to_inst_steps
-from tidalsim.cache_model.mtr import MTR
-from tidalsim.cache_model.cache import CacheParams, CacheState, CohStatus
 
 
 def get_spike_cmd(
@@ -84,7 +80,7 @@ def reg_dump(h: int) -> SpikeCmdBlock:
         f"reg {h} mip",
         f"reg {h} mcycle",
         f"reg {h} minstret",
-        f"mtime",
+        "mtime",
         f"mtimecmp {h}",
     ]
     fpr_dump = [f"freg {h} {fr}" for fr in range(32)]
@@ -182,7 +178,7 @@ def gen_checkpoints(
     run_spike_cmd_file.chmod(run_spike_cmd_file.stat().st_mode | stat.S_IEXEC)
 
     # Actually run spike
-    logging.info(f"Running spike")
+    logging.info("Running spike")
     loadarch_file = ckpt_base_dir / "loadarch"
     run_cmd(f"{spike_cmd} 2> {loadarch_file.resolve()}", cwd=ckpt_base_dir)
 

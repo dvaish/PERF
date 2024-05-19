@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 import logging
+from typing import Optional, List
+import pprint
 
 from pandera.typing import DataFrame
 import numpy as np
@@ -8,6 +10,7 @@ import numpy as np
 from tidalsim.bb.common import BasicBlocks
 from tidalsim.bb.spike import spike_trace_to_bbs, spike_trace_to_embedding_df
 from tidalsim.bb.elf import objdump_to_bbs
+from tidalsim.modeling.extrapolation import pick_intervals_for_rtl_sim
 from tidalsim.util.cli import (
     run_cmd,
     run_cmd_capture,
@@ -19,6 +22,7 @@ from tidalsim.util.spike_ckpt import get_spike_cmd, gen_checkpoints
 from tidalsim.util.spike_log import parse_spike_log
 from tidalsim.util.pickle import load, dump
 from tidalsim.modeling.schemas import EmbeddingSchema, ClusteringSchema
+from tidalsim.cache_model.mtr import MTR, mtr_ckpts_from_inst_points
 
 
 @dataclass
@@ -217,11 +221,65 @@ def tidalsim(args: TidalsimArgs) -> None:
         clustering_df = embedding_df.assign(
             cluster_id=kmeans.labels_,
             dist_to_centroid=lambda x: np.linalg.norm(np.vstack(embedding_df["embedding"].to_numpy()) - kmeans.cluster_centers_[x["cluster_id"]], axis=1),  # type: ignore
-            chosen_for_rtl_sim=lambda x: x.groupby("cluster_id")["dist_to_centroid"].transform(
-                lambda dists: dists == np.min(dists)
-            ),
+            chosen_for_rtl_sim=lambda x: [False for _ in range(len(x.index))],
+            # chosen_for_rtl_sim=lambda x: x.groupby("cluster_id")["dist_to_centroid"].transform(
+            #     lambda dists: dists == np.min(dists)
+            # ),
         )
+        pick_intervals_for_rtl_sim(
+            clustering_df, 0
+        )  # for now, only take the closest point from each centroid
         dump(clustering_df, clustering_df_file)
         logging.info(f"Saving clustering DF to {clustering_df_file}")
 
     logging.info(f"Clustering DF\n{clustering_df}")
+
+    # Create the directories for each interval we want to simulate in RTL simulation
+    intervals_to_simulate = clustering_df.loc[clustering_df.chosen_for_rtl_sim == True]
+    intervals_start_points = sorted(intervals_to_simulate["inst_start"].tolist())
+    checkpoint_dir = cluster_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+    checkpoints = [checkpoint_dir / f"0x80000000.{i}" for i in intervals_start_points]
+    for c in checkpoints:
+        c.mkdir(exist_ok=True)
+    logging.info(
+        "The intervals starting at these dynamic instruction counts will be simulated"
+        f" \n{', '.join([str(x) for x in intervals_start_points])}"
+    )
+
+    # Construct MTR checkpoints for the L1d cache
+    mtr_ckpts: Optional[List[MTR]] = None
+    if args.warmup:
+        mtr_ckpts_exist = [(c / "mtr.pickle").exists() for c in checkpoints]
+        if all(mtr_ckpts_exist):
+            logging.info("MTR checkpoints already exist for each interval to simulate")
+            mtr_ckpts = [load(c / "mtr.pickle") for c in checkpoints]
+        else:
+            logging.info(f"Generating MTR checkpoints at inst points {intervals_start_points}")
+            with spike_trace_file.open("r") as f:
+                spike_trace_log = parse_spike_log(f, full_commit_log)
+                mtr_ckpts = mtr_ckpts_from_inst_points(
+                    spike_trace_log, block_size=64, inst_points=intervals_start_points
+                )
+            for mtr_ckpt, ckpt_dir in zip(mtr_ckpts, checkpoints):
+                dump(mtr_ckpt, ckpt_dir / "mtr.pickle")
+                with (ckpt_dir / "mtr.pretty").open("w") as f:
+                    pprint.pprint(mtr_ckpt, stream=f)
+
+    # Capture arch checkpoints from spike
+    # Cache this result if all the checkpoints are already available
+    checkpoints_exist = [
+        (c / "loadarch").exists() and (c / "mem.elf").exists() for c in checkpoints
+    ]
+    if all(checkpoints_exist):
+        logging.info("Checkpoints already exist, not rerunning spike")
+    else:
+        logging.info("Generating arch checkpoints with spike")
+        gen_checkpoints(
+            args.binary,
+            start_pc=0x8000_0000,
+            inst_points=intervals_start_points,
+            ckpt_base_dir=checkpoint_dir,
+            n_harts=args.n_harts,
+            isa=args.isa,
+        )
