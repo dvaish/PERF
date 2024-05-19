@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import logging
 
+from joblib import Parallel, delayed
 
 from tidalsim.modeling.run import GoldenSimArgs, goldensim
 
@@ -12,7 +13,6 @@ def main():
     )
 
     parser = argparse.ArgumentParser(prog="goldensim", description="Full RTL simulation")
-    parser.add_argument("--binary", type=str, required=True, help="RISC-V binary to run")
     parser.add_argument(
         "--sampling-period",
         type=int,
@@ -36,21 +36,50 @@ def main():
         "--rundir", type=str, required=True, help="Directory in which checkpoints are dumped"
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument(
+        "binary",
+        type=str,
+        help="RISC-V binary or a directory containing RISC-V binaries to run",
+    )
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    goldensim_args = GoldenSimArgs(
-        binary=Path(args.binary).resolve(),
-        rundir=Path(args.rundir).resolve(),
-        chipyard_root=Path(args.chipyard_root).resolve(),
-        rtl_simulator=Path(args.simulator).resolve(),
-        n_harts=n_harts,
-        isa=isa,
-    )
-    assert goldensim_args.chipyard_root.is_dir()
-    assert goldensim_args.binary.exists()
-    assert goldensim_args.sampling_period > 1
-    goldensim_args.rundir.mkdir(parents=True, exist_ok=True)
 
-    goldensim(goldensim_args)
+    binary = Path(args.binary).resolve()
+    if binary.is_file():
+        goldensim_args = GoldenSimArgs(
+            binary=Path(args.binary).resolve(),
+            rundir=Path(args.rundir).resolve(),
+            chipyard_root=Path(args.chipyard_root).resolve(),
+            rtl_simulator=Path(args.simulator).resolve(),
+            n_threads=1,
+            n_harts=n_harts,
+            isa=isa,
+            sampling_period=args.sampling_period,
+        )
+        assert goldensim_args.chipyard_root.is_dir()
+        assert goldensim_args.binary.exists()
+        goldensim_args.rundir.mkdir(parents=True, exist_ok=True)
+
+        goldensim(goldensim_args)
+    else:
+        assert binary.is_dir()
+        goldensim_args = [
+            GoldenSimArgs(
+                binary=binary,
+                rundir=Path(args.rundir).resolve(),
+                chipyard_root=Path(args.chipyard_root).resolve(),
+                rtl_simulator=Path(args.simulator).resolve(),
+                n_threads=1,
+                n_harts=n_harts,
+                isa=isa,
+                sampling_period=args.sampling_period,
+            )
+            for binary in binary.glob("*")
+            if binary.is_file()
+        ]
+        assert goldensim_args[0].chipyard_root.is_dir()
+        goldensim_args[0].rundir.mkdir(parents=True, exist_ok=True)
+
+        Parallel(n_jobs=len(goldensim_args))(delayed(goldensim)(args) for args in goldensim_args)

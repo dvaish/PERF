@@ -20,6 +20,12 @@ def main():
         required=True,
         help="Length of a program interval in instructions",
     )
+    parser.add_argument(
+        "--n-threads",
+        type=int,
+        required=True,
+        help="Number of threads to use for parallel checkpointing + RTL simulation",
+    )
     parser.add_argument("-c", "--clusters", type=int, required=True, help="Number of clusters")
     # parser.add_argument('--n-harts', type=int, default=1, help='Number of harts [default 1]')
     n_harts = 1  # hardcode this for now
@@ -57,6 +63,7 @@ def main():
         rundir=Path(args.rundir).resolve(),
         chipyard_root=Path(args.chipyard_root).resolve(),
         rtl_simulator=Path(args.simulator).resolve(),
+        n_threads=args.n_threads,
         n_harts=n_harts,
         isa=isa,
         interval_length=args.interval_length,

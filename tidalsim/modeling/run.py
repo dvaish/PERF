@@ -32,6 +32,7 @@ class RunArgs:
     rundir: Path
     chipyard_root: Path
     rtl_simulator: Path
+    n_threads: int
     n_harts: int = 1
     isa: str = "rv64gc"
 
@@ -77,6 +78,7 @@ def goldensim(args: GoldenSimArgs) -> None:
             start_pc=0x8000_0000,
             inst_points=[0],
             ckpt_base_dir=golden_sim_dir,
+            n_threads=1,
             n_harts=args.n_harts,
             isa=args.isa,
         )
@@ -281,6 +283,7 @@ def tidalsim(args: TidalsimArgs) -> None:
             start_pc=0x8000_0000,
             inst_points=intervals_start_points,
             ckpt_base_dir=checkpoint_dir,
+            n_threads=args.n_threads,
             n_harts=args.n_harts,
             isa=args.isa,
         )
@@ -323,6 +326,6 @@ def tidalsim(args: TidalsimArgs) -> None:
             )
             run_cmd(rtl_sim_cmd, cwd=checkpoint_dir)
 
-        Parallel(n_jobs=-1)(
+        Parallel(n_jobs=args.n_threads)(
             delayed(run_checkpoint_rtl_sim)(checkpoint) for checkpoint in checkpoints
         )

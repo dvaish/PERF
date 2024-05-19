@@ -142,6 +142,7 @@ def gen_checkpoints(
     start_pc: int,
     inst_points: List[int],
     ckpt_base_dir: Path,
+    n_threads: int,
     n_harts: int = 1,
     isa: str = "rv64gc",
 ) -> None:
@@ -238,4 +239,4 @@ def gen_checkpoints(
         )
         rawmem_elf.unlink()
 
-    Parallel(n_jobs=-1)(delayed(convert_spike_mems)(ckpt_dir) for ckpt_dir in ckpt_dirs)
+    Parallel(n_jobs=n_threads)(delayed(convert_spike_mems)(ckpt_dir) for ckpt_dir in ckpt_dirs)
