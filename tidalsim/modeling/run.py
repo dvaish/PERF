@@ -6,6 +6,7 @@ import pprint
 
 from pandera.typing import DataFrame
 import numpy as np
+from joblib import Parallel, delayed
 
 from tidalsim.bb.common import BasicBlocks
 from tidalsim.bb.spike import spike_trace_to_bbs, spike_trace_to_embedding_df
@@ -13,7 +14,6 @@ from tidalsim.bb.elf import objdump_to_bbs
 from tidalsim.modeling.extrapolation import pick_intervals_for_rtl_sim
 from tidalsim.util.cli import (
     run_cmd,
-    run_cmd_capture,
     run_cmd_pipe,
     run_rtl_sim_cmd,
     run_cmd_pipe_stdout,
@@ -23,6 +23,7 @@ from tidalsim.util.spike_log import parse_spike_log
 from tidalsim.util.pickle import load, dump
 from tidalsim.modeling.schemas import EmbeddingSchema, ClusteringSchema
 from tidalsim.cache_model.mtr import MTR, mtr_ckpts_from_inst_points
+from tidalsim.cache_model.cache import CacheParams, CacheState
 
 
 @dataclass
@@ -282,4 +283,46 @@ def tidalsim(args: TidalsimArgs) -> None:
             ckpt_base_dir=checkpoint_dir,
             n_harts=args.n_harts,
             isa=args.isa,
+        )
+
+    if args.warmup:
+        assert mtr_ckpts
+        cache_params = CacheParams(phys_addr_bits=32, block_size_bytes=64, n_sets=64, n_ways=4)
+        for mtr, ckpt_dir in zip(mtr_ckpts, checkpoints):
+            cache_state: CacheState
+            with (ckpt_dir / "mem.0x80000000.bin").open("rb") as f:
+                cache_state = mtr.as_cache(cache_params, f, dram_base=0x8000_0000)
+            cache_state.dump_data_arrays(ckpt_dir, "dcache_data_array")
+            cache_state.dump_tag_arrays(ckpt_dir, "dcache_tag_array")
+
+    # Run each checkpoint in RTL sim and extract perf metrics
+    perf_filename = "perf_warmup.csv" if args.warmup else "perf_cold.csv"
+    perf_files_exist = all([(c / perf_filename).exists() for c in checkpoints])
+    if perf_files_exist:
+        logging.info(
+            "Performance metrics for checkpoints already collected, skipping RTL simulation"
+        )
+    else:
+        logging.info(
+            "Running parallel RTL simulations to collect performance metrics for checkpoints"
+        )
+
+        def run_checkpoint_rtl_sim(checkpoint_dir: Path) -> None:
+            rtl_sim_cmd = run_rtl_sim_cmd(
+                simulator=args.rtl_simulator,
+                perf_file=(checkpoint_dir / perf_filename),
+                perf_sample_period=int(
+                    args.interval_length / 10
+                ),  # sample perf at least 10 times in an interval to give some granularity for detailed warmup
+                max_instructions=args.interval_length,
+                chipyard_root=args.chipyard_root,
+                binary=(checkpoint_dir / "mem.elf"),
+                loadarch=(checkpoint_dir / "loadarch"),
+                suppress_exit=True,
+                checkpoint_dir=(checkpoint_dir if args.warmup else None),
+            )
+            run_cmd(rtl_sim_cmd, cwd=checkpoint_dir)
+
+        Parallel(n_jobs=-1)(
+            delayed(run_checkpoint_rtl_sim)(checkpoint) for checkpoint in checkpoints
         )
