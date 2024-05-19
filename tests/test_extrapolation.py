@@ -22,17 +22,17 @@ class TestExtrapolation:
             f.write(perf_file_csv)
         cycles = 180 + 140 + 130 + 135
         perf = parse_perf_file(perf_file, detailed_warmup_insts=0)
-        expected_perf = PerfMetrics(ipc=400 / (180 + 140 + 130 + 135), cycles=cycles)
+        expected_perf = PerfMetrics(ipc=400 / (180 + 140 + 130 + 135))
         assert perf == expected_perf
 
         perf = parse_perf_file(perf_file, detailed_warmup_insts=100)
-        expected_perf = PerfMetrics(ipc=300 / (140 + 130 + 135), cycles=cycles)
+        expected_perf = PerfMetrics(ipc=300 / (140 + 130 + 135))
         assert perf == expected_perf
 
         perf = parse_perf_file(
             perf_file, detailed_warmup_insts=150
         )  # should round up to the next interval after 150 insts
-        expected_perf = PerfMetrics(ipc=200 / (130 + 135), cycles=cycles)
+        expected_perf = PerfMetrics(ipc=200 / (130 + 135))
         assert perf == expected_perf
 
     def test_fill_perf_metrics(self, tmp_path: Path) -> None:
@@ -58,12 +58,12 @@ class TestExtrapolation:
         cluster_dir = tmp_path / "checkpoints" / "0x80000000.100"
         cluster_dir.mkdir(parents=True)
         (cluster_dir / "perf_cold.csv").write_text(perf_file_cold)
-        (cluster_dir / "perf_warm.csv").write_text(perf_file_warm)
+        (cluster_dir / "perf_warmup.csv").write_text(perf_file_warm)
 
         perf_df = fill_perf_metrics(clustering_df, tmp_path, detailed_warmup_insts=0)
         row_with_data = perf_df.iloc[1]
-        assert row_with_data.est_cycles_cold == 170
-        assert row_with_data.est_cycles_warm == 140
+        assert row_with_data.est_ipc_cold == (100 / 170)
+        assert row_with_data.est_ipc_warm == (100 / 140)
 
     def test_pick_intervals_for_rtl_sim(self) -> None:
         clustering_df = DataFrame[ClusteringSchema]({

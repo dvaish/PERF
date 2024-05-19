@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
-from sklearn.metrics import cluster
 
 from tidalsim.util.pickle import load
 from tidalsim.modeling.schemas import ClusteringSchema, EstimatedPerfSchema, GoldenPerfSchema
@@ -13,7 +12,6 @@ from tidalsim.modeling.schemas import ClusteringSchema, EstimatedPerfSchema, Gol
 
 @dataclass
 class PerfMetrics:
-    cycles: int
     ipc: float
 
 
@@ -33,7 +31,7 @@ def parse_perf_file(
     start_point = (perf_data["insts_retired_before_interval"] >= detailed_warmup_insts).idxmax()
     perf_data_visible = perf_data[start_point:]
     ipc = np.sum(perf_data_visible["instret"]) / np.sum(perf_data_visible["cycles"])
-    return PerfMetrics(ipc=ipc, cycles=np.sum(perf_data["cycles"]))
+    return PerfMetrics(ipc=ipc)
 
 
 # Fill each row in the [clustering_df] that was chosen for RTL simulation with performance numbers from RTL sim
@@ -47,9 +45,7 @@ def fill_perf_metrics(
     perf_df = cast(
         DataFrame[EstimatedPerfSchema],
         clustering_df.assign(
-            est_cycles_cold=np.zeros(len(clustering_df.index)),
             est_ipc_cold=np.zeros(len(clustering_df.index)),
-            est_cycles_warm=np.zeros(len(clustering_df.index)),
             est_ipc_warm=np.zeros(len(clustering_df.index)),
         ),
     )
@@ -57,14 +53,12 @@ def fill_perf_metrics(
     for index, row in simulated_rows.iterrows():
         checkpoint_dir = cluster_dir / "checkpoints" / f"0x80000000.{row.inst_start}"
         cold_perf_file = checkpoint_dir / "perf_cold.csv"
-        warm_perf_file = checkpoint_dir / "perf_warm.csv"
+        warm_perf_file = checkpoint_dir / "perf_warmup.csv"
         if cold_perf_file.exists():
             cold_perf = parse_perf_file(cold_perf_file, detailed_warmup_insts)
-            row.est_cycles_cold = cold_perf.cycles
             row.est_ipc_cold = cold_perf.ipc
         if warm_perf_file.exists():
             warm_perf = parse_perf_file(warm_perf_file, detailed_warmup_insts)
-            row.est_cycles_warm = warm_perf.cycles
             row.est_ipc_warm = warm_perf.ipc
         perf_df.iloc[index] = row
     return perf_df
@@ -93,19 +87,21 @@ def analyze_tidalsim_results(
 ) -> Tuple[DataFrame[EstimatedPerfSchema], Optional[DataFrame[GoldenPerfSchema]]]:
     interval_dir = run_dir / f"n_{interval_length}_{'elf' if elf else 'spike'}"
     cluster_dir = interval_dir / f"c_{clusters}"
-
     clustering_df = load(cluster_dir / "clustering_df.pickle")
-    perf_infos = get_perf_infos(clustering_df, cluster_dir)
+    estimated_perf_df = fill_perf_metrics(clustering_df, cluster_dir, detailed_warmup_insts)
 
-    ipcs = np.array([perf.ipc for perf in perf_infos])
-    estimated_perf_df: DataFrame[EstimatedPerfSchema]
     if not interpolate_clusters:
-        # If we don't interpolate, we just use the IPC of the simulated point for that cluster
+        # If we don't interpolate, we just use the average IPC of the simulated points for that cluster
+        ipcs = (
+            estimated_perf_df.sort_values("cluster_id").groupby("cluster_id")["est_ipc_warm"].mean()
+        )
         estimated_perf_df = clustering_df.assign(
             est_ipc=ipcs[clustering_df["cluster_id"]],
             est_cycles=lambda x: np.round(x["instret"] * np.reciprocal(x["est_ipc"])),
         )
     else:
+        assert False
+        # TODO: fix this block
         # If we do interpolate, we use a weighted (by inverse L2 norm) average of the IPCs of all simulated points
         kmeans_file = cluster_dir / "kmeans_model.pickle"
         kmeans = load(kmeans_file)

@@ -24,13 +24,7 @@ class ClusteringSchema(EmbeddingSchema, pa.DataFrameModel):
 
 
 class EstimatedPerfSchema(ClusteringSchema, pa.DataFrameModel):
-    ## Cold (no warmup) estimates
-    # Estimated number of cycles executed in this interval (from extrapolation)
-    est_cycles_cold: Series[int]
-    # Estimated IPC based on [est_cycles_cold] and [instret]
     est_ipc_cold: Series[float]
-    ## Warm (functional L1 cache warmup) estimates
-    est_cycles_warm: Series[int]
     est_ipc_warm: Series[float]
 
 
