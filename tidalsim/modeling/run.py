@@ -93,6 +93,7 @@ def goldensim(args: GoldenSimArgs) -> None:
             loadarch=(inst_0_ckpt / "loadarch"),
             suppress_exit=False,
             checkpoint_dir=None,
+            timeout_cycles=100_000_000,
         )
         run_cmd(rtl_sim_cmd, cwd=golden_sim_dir)
 

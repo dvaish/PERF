@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import logging
 
+from joblib import Parallel, delayed
 
 from tidalsim.modeling.run import TidalsimArgs, tidalsim
 
@@ -12,7 +13,6 @@ def main():
     )
 
     parser = argparse.ArgumentParser(prog="tidalsim", description="Sampled simulation")
-    parser.add_argument("--binary", type=str, required=True, help="RISC-V binary to run")
     parser.add_argument(
         "-n",
         "--interval-length",
@@ -54,28 +54,59 @@ def main():
             "Use functional warmup to initialize the L1d cache at the start of each RTL simulation"
         ),
     )
+    parser.add_argument(
+        "binary", type=str, help="RISC-V binary or a directory containing RISC-V binaries to run"
+    )
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    tidalsim_args = TidalsimArgs(
-        binary=Path(args.binary).resolve(),
-        rundir=Path(args.rundir).resolve(),
-        chipyard_root=Path(args.chipyard_root).resolve(),
-        rtl_simulator=Path(args.simulator).resolve(),
-        n_threads=args.n_threads,
-        n_harts=n_harts,
-        isa=isa,
-        interval_length=args.interval_length,
-        clusters=args.clusters,
-        warmup=args.cache_warmup,
-        points_per_cluster=1,
-        bb_from_elf=args.elf,
-    )
-    assert tidalsim_args.rtl_simulator.exists() and tidalsim_args.rtl_simulator.is_file()
-    assert tidalsim_args.chipyard_root.is_dir()
-    assert tidalsim_args.binary.exists()
-    assert tidalsim_args.interval_length > 1
-    tidalsim_args.rundir.mkdir(parents=True, exist_ok=True)
 
-    tidalsim(tidalsim_args)
+    binary = Path(args.binary).resolve()
+    if binary.is_file():
+        tidalsim_args = TidalsimArgs(
+            binary=Path(args.binary).resolve(),
+            rundir=Path(args.rundir).resolve(),
+            chipyard_root=Path(args.chipyard_root).resolve(),
+            rtl_simulator=Path(args.simulator).resolve(),
+            n_threads=args.n_threads,
+            n_harts=n_harts,
+            isa=isa,
+            interval_length=args.interval_length,
+            clusters=args.clusters,
+            warmup=args.cache_warmup,
+            points_per_cluster=1,
+            bb_from_elf=args.elf,
+        )
+        assert tidalsim_args.rtl_simulator.exists() and tidalsim_args.rtl_simulator.is_file()
+        assert tidalsim_args.chipyard_root.is_dir()
+        assert tidalsim_args.binary.exists()
+        assert tidalsim_args.interval_length > 1
+        tidalsim_args.rundir.mkdir(parents=True, exist_ok=True)
+
+        tidalsim(tidalsim_args)
+    else:
+        assert binary.is_dir()
+
+        tidalsim_args = [
+            TidalsimArgs(
+                binary=binary,
+                rundir=Path(args.rundir).resolve(),
+                chipyard_root=Path(args.chipyard_root).resolve(),
+                rtl_simulator=Path(args.simulator).resolve(),
+                n_threads=8,  # let each run use at most 8 threads
+                n_harts=n_harts,
+                isa=isa,
+                interval_length=args.interval_length,
+                clusters=args.clusters,
+                warmup=args.cache_warmup,
+                points_per_cluster=1,
+                bb_from_elf=args.elf,
+            )
+            for binary in binary.glob("*")
+            if binary.is_file()
+        ]
+        assert tidalsim_args[0].chipyard_root.is_dir()
+        tidalsim_args[0].rundir.mkdir(parents=True, exist_ok=True)
+
+        Parallel(n_jobs=int(args.n_threads / 8))(delayed(tidalsim)(args) for args in tidalsim_args)
