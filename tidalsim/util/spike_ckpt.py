@@ -1,18 +1,14 @@
 from typing import List, Optional, Iterator
 from pathlib import Path
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
 import stat
-import shutil
 import itertools
 
 from joblib import Parallel, delayed
 
 from tidalsim.util.cli import run_cmd, run_cmd_capture
 from tidalsim.util.random import inst_points_to_inst_steps
-from tidalsim.cache_model.mtr import MTR
-from tidalsim.cache_model.cache import CacheParams, CacheState, CohStatus
 
 
 def get_spike_cmd(
@@ -36,8 +32,8 @@ def get_spike_cmd(
         "+suppress-exit" if suppress_exit else ""
     )  # This is an HTIF flag and must be passed last!
     return (
-        "spike"
-        f" {debug_flags} {spike_flags} {inst_log_flag} {commit_log_flag} {suppress_exit_flag} {binary.resolve()}"
+        "spike "
+        f"{debug_flags} {spike_flags} {inst_log_flag} {commit_log_flag} {suppress_exit_flag} {binary.resolve()}"
     )
 
 
@@ -84,7 +80,7 @@ def reg_dump(h: int) -> SpikeCmdBlock:
         f"reg {h} mip",
         f"reg {h} mcycle",
         f"reg {h} minstret",
-        f"mtime",
+        "mtime",
         f"mtimecmp {h}",
     ]
     fpr_dump = [f"freg {h} {fr}" for fr in range(32)]
@@ -146,6 +142,7 @@ def gen_checkpoints(
     start_pc: int,
     inst_points: List[int],
     ckpt_base_dir: Path,
+    n_threads: int,
     n_harts: int = 1,
     isa: str = "rv64gc",
 ) -> None:
@@ -182,7 +179,7 @@ def gen_checkpoints(
     run_spike_cmd_file.chmod(run_spike_cmd_file.stat().st_mode | stat.S_IEXEC)
 
     # Actually run spike
-    logging.info(f"Running spike")
+    logging.info("Running spike")
     loadarch_file = ckpt_base_dir / "loadarch"
     run_cmd(f"{spike_cmd} 2> {loadarch_file.resolve()}", cwd=ckpt_base_dir)
 
@@ -242,4 +239,4 @@ def gen_checkpoints(
         )
         rawmem_elf.unlink()
 
-    Parallel(n_jobs=-1)(delayed(convert_spike_mems)(ckpt_dir) for ckpt_dir in ckpt_dirs)
+    Parallel(n_jobs=n_threads)(delayed(convert_spike_mems)(ckpt_dir) for ckpt_dir in ckpt_dirs)
